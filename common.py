@@ -65,12 +65,17 @@ def _parse_json(text):
     raise ValueError(f"no valid JSON in LLM reply: {text[:200]}")
 
 
-def _cursor_cli_json(prompt, system, retries):
+def _cursor_model(purpose):
+    """Resolve the model for a purpose ("fast" | "reasoning"); empty = Cursor Auto."""
+    return os.environ.get(f"CURSOR_MODEL_{purpose.upper()}") or os.environ.get("CURSOR_MODEL") or ""
+
+
+def _cursor_cli_json(prompt, system, retries, purpose="fast"):
     """Run the prompt through the Cursor CLI (uses the user's Cursor subscription)."""
     import subprocess
 
     cmd = ["cursor-agent", "--print", "--output-format", "text", "--mode", "ask", "--trust"]
-    model = os.environ.get("CURSOR_MODEL")
+    model = _cursor_model(purpose)
     if model:
         cmd += ["--model", model]
     full = f"{system}\n\n{prompt}\n\nReply with valid JSON only. No prose, no markdown fences."
@@ -86,9 +91,9 @@ def _cursor_cli_json(prompt, system, retries):
     raise last_err
 
 
-def llm_json(client, prompt, system="You are a precise analyst. Reply with valid JSON only, no prose.", retries=2):
+def llm_json(client, prompt, system="You are a precise analyst. Reply with valid JSON only, no prose.", retries=2, purpose="fast"):
     if llm_backend() == "cursor":
-        return _cursor_cli_json(prompt, system, retries)
+        return _cursor_cli_json(prompt, system, retries, purpose)
     model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     last_err = None
     for _ in range(retries + 1):

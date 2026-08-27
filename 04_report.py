@@ -97,7 +97,7 @@ def main():
         client = llm_client()
         for c in scored[: args.llm_top_n]:
             try:
-                c["qualitative"] = llm_json(client, QUALITATIVE_PROMPT + json.dumps(c, ensure_ascii=False))
+                c["qualitative"] = llm_json(client, QUALITATIVE_PROMPT + json.dumps(c, ensure_ascii=False), purpose="reasoning")
             except Exception as e:
                 print(f"  qualitative pass failed {c['name']}: {e}")
     else:
