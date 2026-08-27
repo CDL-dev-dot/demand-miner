@@ -9,14 +9,13 @@ import argparse
 import csv
 import json
 import math
-import os
 
 from common import DATA, llm_json, read_jsonl
 
-QUALITATIVE_PROMPT = """You are advising a solo iOS developer. For the app-need cluster below (mined from Reddit, validated against the US App Store), give a hard-nosed judgment.
+QUALITATIVE_PROMPT = """You are advising a solo iOS developer. For the unmet-need cluster below (mined from low-rated US App Store reviews and validated against current competitors), give a hard-nosed judgment.
 
 Reply JSON:
-- fake_need_risk: low | medium | high, with one-line reason (is this a real recurring need or venting/one-off?)
+- fake_need_risk: low | medium | high, with one-line reason (is this recurring across reviewers/apps or just app-specific venting?)
 - apple_policy_risk: low | medium | high, with one-line reason (App Review guidelines: medical claims, adult, copyright, financial data...)
 - solo_feasibility: low | medium | high, with one-line reason (can one person build & operate an MVP?)
 - differentiation: one concrete angle given the competitor situation
@@ -41,7 +40,7 @@ def fmt_q(v):
 
 def deterministic_scores(c):
     a = c.get("appstore", {})
-    demand = min(6, c.get("distinct_authors", 0)) + min(2, c.get("pay_signals", 0))
+    demand = min(6, c.get("distinct_reviewers", 0)) + min(2, c.get("payment_signals", 0))
     if c.get("first_seen") and c.get("last_seen") and c["first_seen"][:7] != c["last_seen"][:7]:
         demand += 2  # spans multiple months, not a one-off spike
 
@@ -101,13 +100,13 @@ def main():
             except Exception as e:
                 print(f"  qualitative pass failed {c['name']}: {e}")
     else:
-        print("skipping LLM qualitative pass (--skip-llm or OPENAI_API_KEY not set)")
+        print("skipping LLM qualitative pass (--skip-llm or no LLM backend configured)")
 
-    md = ["# 需求挖掘报告\n", "| # | 需求簇 | 独立人数 | 付费信号 | 竞品 | 新品 | 总分 | 判定 |", "|---|---|---|---|---|---|---|---|"]
+    md = ["# 需求挖掘报告\n", "| # | 需求簇 | 独立评论用户 | 付费证据 | 竞品 | 新品 | 总分 | 判定 |", "|---|---|---|---|---|---|---|---|"]
     for i, c in enumerate(scored, 1):
         a = c.get("appstore", {})
         md.append(
-            f"| {i} | {c['name']} | {c.get('distinct_authors', 0)} | {c.get('pay_signals', 0)} "
+            f"| {i} | {c['name']} | {c.get('distinct_reviewers', 0)} | {c.get('payment_signals', 0)} "
             f"| {a.get('relevant_matched', a.get('total_matched', 0))} | {a.get('new_apps_count', 0)} | {c['scores']['total']} | {c['verdict']} |"
         )
 
@@ -116,8 +115,9 @@ def main():
         md += [
             f"\n## {c['name']}\n",
             f"- 需求陈述：{c['need_statement']}",
-            f"- 信号：{c.get('distinct_authors', 0)} 个独立发帖人，{c.get('first_seen', '?')} ~ {c.get('last_seen', '?')}，"
-            f"付费信号 {c.get('pay_signals', 0)} 条，情绪均值 {c.get('avg_emotion', '-')}",
+            f"- 信号：{c.get('distinct_reviewers', 0)} 个独立评论用户，来自 {c.get('source_app_count', 0)} 款 App，"
+            f"{c.get('first_seen', '?')} ~ {c.get('last_seen', '?')}，付费证据 {c.get('payment_signals', 0)} 条，"
+            f"评论星级均值 {c.get('avg_source_rating', '-')}，情绪均值 {c.get('avg_emotion', '-')}",
             f"- 竞争：相关竞品 {a.get('relevant_matched', 0)} 款（原始匹配 {a.get('total_matched', 0)}）；近 18 月相关新品 {a.get('new_apps_count', 0)} 款"
             f"{'（蜂群警报）' if a.get('swarm') else ''}{'；头部竞品老旧/低分（翻新机会）' if a.get('leader_stale') else ''}",
             f"- 评分：需求 {c['scores']['demand']}/10 · 窗口 {c['scores']['window']}/10 · 付费证据 {c['scores']['evidence']}/10 · **总分 {c['scores']['total']}** → {c['verdict']}",
@@ -126,8 +126,10 @@ def main():
             md.append("- 头部竞品：")
             for t in a["top_apps"]:
                 md.append(f"  - {t['name']}｜评分 {t['rating']}｜评论 {t['reviews']}｜{t['price']}｜上架 {t['released']}｜更新 {t['last_update']}")
-        if c.get("pay_quotes"):
-            md.append("- 付费信号原文：" + "；".join(f"「{q}」" for q in c["pay_quotes"]))
+        if c.get("source_apps"):
+            md.append("- 需求来源 App：" + "、".join(c["source_apps"][:8]))
+        if c.get("payment_quotes"):
+            md.append("- 付费证据原文：" + "；".join(f"「{q}」" for q in c["payment_quotes"]))
         if c.get("qualitative"):
             q = c["qualitative"]
             md.append(
@@ -144,11 +146,11 @@ def main():
     csv_path = DATA / "04_report.csv"
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["name", "distinct_authors", "pay_signals", "total_matched", "new_apps", "swarm", "demand", "window", "evidence", "total", "verdict"])
+        w.writerow(["name", "distinct_reviewers", "payment_signals", "source_app_count", "total_matched", "new_apps", "swarm", "demand", "window", "evidence", "total", "verdict"])
         for c in scored:
             a = c.get("appstore", {})
             s = c["scores"]
-            w.writerow([c["name"], c.get("distinct_authors", 0), c.get("pay_signals", 0), a.get("total_matched", 0),
+            w.writerow([c["name"], c.get("distinct_reviewers", 0), c.get("payment_signals", 0), c.get("source_app_count", 0), a.get("total_matched", 0),
                         a.get("new_apps_count", 0), a.get("swarm", False), s["demand"], s["window"], s["evidence"], s["total"], c["verdict"]])
     print(f"CSV -> {csv_path}")
 

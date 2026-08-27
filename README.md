@@ -1,105 +1,176 @@
 # demand-miner
 
-> **For Reddit API reviewers:** This is a personal, non-commercial, **read-only** research
-> script built on [PRAW](https://praw.readthedocs.io). It searches public posts for
-> need-expressing phrases (e.g. "is there an app that") and reads top posts/comments from a
-> few public subreddits, to analyze recurring user needs for product research. It never
-> posts, comments, votes, or messages; it stays within free-tier rate limits (PRAW's
-> built-in throttling); Reddit content is analyzed locally and never republished, resold,
-> or used for AI model training. Credentials live in an untracked `.env` file.
+一套用于发现 App Store 产品翻新机会的四阶段调研流水线：
+采集低星用户评论，通过 LLM 提取和聚类重复出现的未满足需求，
+再验证当前竞品情况，最终对最有潜力的候选方向评分并生成报告。
 
-A four-stage pipeline: mine app-need signals from public Reddit posts → extract and
-cluster needs with an LLM → validate each need cluster against the US App Store →
-score and report. It is a **screening tool, not a decision maker** — it compresses
-thousands of posts into a dozen evidence-backed candidates; the final judgment is still
-done by a human.
+本项目的数据源已从 Reddit 切换为 Apple App Store，无需 Reddit API 权限。
 
-```
-01_collect.py   Collect via official Reddit API   -> data/01_posts.jsonl
-02_extract.py   LLM need extraction + clustering  -> data/02_needs.jsonl + 02_clusters.jsonl
-03_validate.py  App Store competitor scan (free)  -> data/03_validated.jsonl
-04_report.py    Scoring + LLM qualitative pass    -> data/04_report.md + .csv
+```text
+01_collect.py   搜索 App 并采集低星评论       -> data/01_reviews.jsonl
+02_extract.py   使用 LLM 提取、聚类未满足需求 -> data/02_needs.jsonl
+                                            -> data/02_clusters.jsonl
+03_validate.py  验证当前 App Store 竞争情况   -> data/03_validated.jsonl
+04_report.py    候选方向评分并生成报告         -> data/04_report.md
+                                            -> data/04_report.csv
 ```
 
-## Quick start
+它是筛选工具，不是自动决策工具。评论中的抱怨可以证明产品存在摩擦，
+但不能直接证明市场规模、获客成本或用户迁移意愿。
+
+## 数据来源
+
+- Apple iTunes Search API：根据 `config.yaml` 中的种子关键词发现相关 App。
+- Apple 公开的用户评论 RSS/JSON：读取各 App 在指定国家商店中的近期评论，
+  无需 API Key；每款 App、每个国家商店最多可读取 10 页。
+- Firecrawl：可选，仅在阶段 3 中补充通用网页竞品搜索。
+
+阶段 1 默认只保留 1–3 星评论。评论者昵称在写入本地文件前会被转换成
+不可直接识别的哈希值。
+
+## 快速开始
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env   # then fill in credentials, see below
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
 ```
 
-`.env` takes three groups of credentials:
+在 `.env` 中选择一种 LLM 后端。
 
-1. **Reddit** (free tier): create a **script**-type app at
-   https://www.reddit.com/prefs/apps to get the client id (the string shown under
-   "personal use script") and secret. Describe the use case honestly ("personal
-   research"). The free tier allows 100 queries/minute; PRAW throttles automatically.
-2. **LLM**, two backend options via `LLM_BACKEND`:
-   - `openai` (default): any OpenAI-compatible endpoint (`OPENAI_BASE_URL` +
-     `OPENAI_API_KEY` + `OPENAI_MODEL`).
-   - `cursor`: pipes prompts through the local [Cursor CLI](https://cursor.com/cli)
-     (`cursor-agent --print --mode ask`), using your Cursor subscription — no API key.
-     One-time setup: `cursor-agent login`. Optional `CURSOR_MODEL` to pin a model.
-3. **Firecrawl** (optional): if set, stage 3 adds a web-side competitor scan;
-   otherwise it is skipped automatically.
+### 使用 Cursor CLI
 
-Full run:
+首次使用先登录：
 
 ```bash
-.venv/bin/python 01_collect.py     # 10-30 min depending on config volume
-.venv/bin/python 02_extract.py     # the token-hungry stage
-.venv/bin/python 03_validate.py    # ~3s per keyword (iTunes API soft limit)
-.venv/bin/python 04_report.py      # read data/04_report.md
+cursor-agent login
 ```
 
-Try the second half without any Reddit credentials (stages 3/4 need no keys at all):
+然后设置：
+
+```dotenv
+LLM_BACKEND=cursor
+```
+
+该模式通过本地 `cursor-agent` CLI 使用你的 Cursor 订阅，无需额外 API Key。
+可以按任务类型指定模型：
+
+```dotenv
+CURSOR_MODEL_FAST=
+CURSOR_MODEL_REASONING=
+```
+
+- `CURSOR_MODEL_FAST`：需求提取、聚类和竞品相关性判断。
+- `CURSOR_MODEL_REASONING`：最终商业价值定性判断。
+- 留空时使用 Cursor Auto；`CURSOR_MODEL` 是两类任务共用的兜底配置。
+
+### 使用 OpenAI 兼容接口
+
+```dotenv
+LLM_BACKEND=openai
+OPENAI_API_KEY=
+OPENAI_BASE_URL=
+OPENAI_MODEL=
+```
+
+直接使用 OpenAI 时，`OPENAI_BASE_URL` 可以留空。
+
+### 可选配置 Firecrawl
+
+```dotenv
+FIRECRAWL_API_KEY=
+```
+
+不填写时，阶段 3 会自动跳过网页侧竞品搜索。
+
+## 配置市场扫描范围
+
+`config.yaml` 中的 `app_search_terms` 是最主要的调研入口：
+
+```yaml
+country: us
+app_search_terms:
+  - subscription tracker
+  - pet medication
+  - ADHD planner
+apps_per_search_term: 3
+review_pages_per_app: 2
+review_ratings: [1, 2, 3]
+max_reviews_per_app: 20
+```
+
+建议使用具体的 App 类别或待办任务关键词。`productivity` 之类的宽泛词会产生
+大量噪声。第一次运行时应控制范围，检查聚类结果后再逐步增加相邻关键词。
+
+## 运行完整流水线
 
 ```bash
-.venv/bin/python 02_extract.py --input data/sample_posts.jsonl     # needs LLM key
-.venv/bin/python 03_validate.py --input data/sample_clusters.jsonl # needs nothing
+.venv/bin/python 01_collect.py
+.venv/bin/python 02_extract.py
+.venv/bin/python 03_validate.py
+.venv/bin/python 04_report.py
+```
+
+阶段 2 消耗的 LLM 调用最多。阶段 3 会在 iTunes Search 请求之间主动等待，
+避免超过其软性请求频率限制。
+
+也可以先使用仓库内的合成样例验证流程：
+
+```bash
+.venv/bin/python 02_extract.py --input data/sample_reviews.jsonl
+.venv/bin/python 03_validate.py --input data/sample_clusters.jsonl
 .venv/bin/python 04_report.py --skip-llm
 ```
 
-## How to read the report (stage 4 rules)
+运行单元测试：
 
-- **Swarm alert**: >= 3 competitor apps released in the last 18 months. The need is
-  real but indie developers are already flooding it — forced downgrade. This is the
-  empirically most common cause of death for "opportunity list" ideas.
-- **Stale leader** (renovation opportunity): the top competitor has >= 500 reviews but
-  a rating < 4.2 or has not been updated for over a year — the best signal to enter.
-- **Payment evidence**: uses the top competitor's review count as a proxy (someone
-  built it at scale = someone pays). "I'd pay for this" comments on Reddit are
-  recorded but never trusted on their own.
-- Weighted total: demand 40% + competition window 35% + payment evidence 25%.
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+```
 
-## Known limitations
+## 评分逻辑
 
-- **Competitor relevance is LLM-judged**: raw keyword search pulls in loosely related
-  apps (clothing stores for "clothing care tags"). When an LLM backend is configured,
-  stage 3 asks it to keep only direct competitors before computing swarm/leader
-  metrics (name-token heuristic as fallback). Raw counts stay in `total_matched`,
-  category giants in `category_leaders`. You can also hand-edit `appstore_keywords`
-  in `02_clusters.jsonl` and rerun stage 3.
-- The iTunes Search API only reflects the search head; long-tail competitors may be
-  missed. Swarm detection is based on each app's original `releaseDate`.
-- Reddit listings cap at ~1000 items each; coverage comes from combining multiple
-  phrases × subreddits × time filters.
-- Stage-2 extraction quality depends on the model; after switching models, compare
-  outputs on `data/sample_posts.jsonl` before a full run.
+- **需求热度（40%）**：独立评论用户数、付费相关证据，以及需求是否跨月出现。
+- **竞争窗口（35%）**：存在强势健康头部或近期新品蜂群时降分；
+  头部产品低分或长期不更新时加分。
+- **付费证据（25%）**：用竞品评论量粗略代表产品采用规模；
+  同时保留评论中涉及订阅、购买、退款、价格敏感度的原文作为辅助证据。
 
-## Compliance
+### 报告标记
 
-- Personal research use only (explicitly covered by Reddit's free tier). Register the
-  app truthfully, never fake the user agent, never scrape web pages around robots.txt.
-- Reddit content is used for analytical insight only — never copy Reddit content into
-  a product; commercializing Reddit data itself requires written approval.
-- The needs you discover, the code you write, and the products you build are yours.
+- **蜂群警报**：配置的 18 个月窗口内，至少出现 3 款直接相关的新竞品。
+  需求可能真实存在，但进入时机较差。
+- **头部老化**：直接竞品头部至少有 500 条评论，且评分低于 4.2，
+  或超过一年没有更新。这是翻新机会信号，并不代表用户一定会迁移。
 
-## Common customizations
+## 已知限制
 
-- Change domains: edit `vertical_subreddits` in `config.yaml` (the main steering wheel)
-- Change storefront: `country: us` → any App Store country code
-- Hunt "paying but unhappy" signals: add phrases like `"alternative to X"` /
-  `"X is too expensive"` (replace X with a competitor name)
-- Bulk history: swap stage 1 for the Arctic Shift community archive (cleaner for research)
-- Scheduled runs: weekly cron + diff two reports to spot newly emerging clusters
+- 种子关键词决定了可发现的范围。本工具更适合发现相邻机会和产品翻新机会，
+  不是对所有 App 创意的无偏扫描。
+- 低星评论会刻意放大不满意用户的声音。正式开发前必须同时检查好评、
+  总评论量和近期版本变化。
+- 公开评论源仅返回近期窗口，每款 App、每个国家商店最多 10 页，
+  不能替代完整历史数据。
+- iTunes 关键词搜索是近似匹配。阶段 3 会优先使用 LLM 保留直接竞品；
+  未配置 LLM 时会退化为名称关键词启发式判断。
+- App Store 评论量只能代表采用规模，不能直接代表收入、客单价或转化率。
+- `formattedPrice` 仅代表下载价格，显示 `Free` 不代表 App 内没有订阅或内购。
+- LLM 可能错误合并无关抱怨，也可能把单个 App 的 Bug 过度泛化。
+  对高分候选必须回看报告中的来源链接。
+
+## 数据处理与合规
+
+- 原始评论文件仅保存在本地，生成的数据文件默认被 Git 忽略。
+- 不要公开转载评论原文或评论者信息。报告如需对外分享，应先删除原文引用。
+- 公开接口可访问不等于获得内容再分发权，使用者仍需遵守 Apple 相关条款
+  以及后续接口规则变化。
+- 采集器使用保守的数量限制和可配置延迟，不应绕过接口限制，
+  也不应尝试突破公开评论源的最大分页数。
+
+## 常见调整
+
+- 修改 `country`，切换目标国家商店。
+- 替换 `app_search_terms`，聚焦高客单价或特定垂直品类。
+- 提高 `minimum_app_rating_count`，研究成熟市场。
+- 降低该阈值，观察较新的细分市场，但需要谨慎处理样本不足。
+- 每周定时运行并比较需求簇数量，发现持续出现的新抱怨。

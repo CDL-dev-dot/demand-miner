@@ -1,8 +1,7 @@
-"""Stage 2: LLM need extraction and clustering.
+"""Stage 2: LLM need extraction and clustering from App Store reviews.
 
-Extracts 0..n needs per post (with pay signals and emotion intensity), then clusters
-across posts. Output: data/02_needs.jsonl (detail) and data/02_clusters.jsonl (clusters
-that feed stage 3).
+Extracts 0..n transferable unmet needs per low-rated review, then clusters them
+across apps. Output: data/02_needs.jsonl and data/02_clusters.jsonl.
 """
 import argparse
 import json
@@ -10,23 +9,23 @@ from datetime import datetime, timezone
 
 from common import DATA, llm_client, llm_json, load_config, read_jsonl, write_jsonl
 
-EXTRACT_PROMPT = """For each Reddit post below, identify explicit or implicit UNMET NEEDS that could plausibly be solved by a mobile app.
-Ignore jokes, memes, politics, and needs already perfectly served by well-known apps UNLESS the poster expresses dissatisfaction with existing options.
+EXTRACT_PROMPT = """For each low-rated US App Store review below, identify explicit or implicit UNMET NEEDS that could plausibly be solved by a mobile app.
+Focus on reusable jobs-to-be-done, missing features, workflow failures, privacy concerns, pricing friction, and reliability problems. Ignore praise, vague anger, one-off account/support disputes, and app-specific bugs that do not imply a broader product opportunity.
 
 For each need found, output an object:
-- post_id: the post id it came from
+- review_id: the review id it came from
 - need_summary: <=15 words, English, describing the job-to-be-done
 - audience: who has this need
 - frequency: one of daily | weekly | occasional | one_off
-- existing_solutions: what the poster tried or mentioned (string, may be empty)
+- existing_solutions: the reviewed app or alternatives mentioned (string, may be empty)
 - dissatisfaction: why current options fail them (string, may be empty)
-- pay_signal: verbatim quote if any willingness to pay is expressed, else null
+- pay_signal: verbatim quote showing payment, subscription, refund, price sensitivity, or willingness to pay; otherwise null
 - emotion: pain intensity 1-5
 - app_shaped: true if an iOS app could realistically address it
 
-A post may yield zero needs. Reply JSON: {"needs": [...]}
+A review may yield zero needs. Reply JSON: {"needs": [...]}
 
-Posts:
+Reviews:
 """
 
 CLUSTER_PROMPT_TEMPLATE = """Group these app-need statements into clusters where members describe the SAME underlying need (same job-to-be-done for a similar audience). Do not force unrelated needs together; singleton clusters are fine.
@@ -50,20 +49,21 @@ Clusters:
 """
 
 
-def extract_needs(client, posts, batch_size):
+def extract_needs(client, reviews, batch_size):
     needs = []
-    post_by_id = {p["id"]: p for p in posts}
-    for i in range(0, len(posts), batch_size):
-        batch = posts[i : i + batch_size]
+    review_by_id = {review["id"]: review for review in reviews}
+    for i in range(0, len(reviews), batch_size):
+        batch = reviews[i : i + batch_size]
         payload = [
             {
-                "post_id": p["id"],
-                "subreddit": p["subreddit"],
-                "title": p["title"],
-                "text": p["selftext"][:1500],
-                "top_comments": " | ".join(p.get("top_comments", []))[:1000],
+                "review_id": review["id"],
+                "app_name": review["app_name"],
+                "app_genre": review.get("app_genre", ""),
+                "rating": review["rating"],
+                "title": review["title"],
+                "review": review["selftext"][:2000],
             }
-            for p in batch
+            for review in batch
         ]
         try:
             result = llm_json(client, EXTRACT_PROMPT + json.dumps(payload, ensure_ascii=False))
@@ -71,14 +71,17 @@ def extract_needs(client, posts, batch_size):
             print(f"  batch {i} extraction failed, skipping: {e}")
             continue
         for n in result.get("needs", []):
-            src = post_by_id.get(n.get("post_id"))
+            src = review_by_id.get(n.get("review_id"))
             if not src or not n.get("app_shaped"):
                 continue
-            n["author"] = src["author"]
+            n["reviewer_id"] = src["reviewer_id"]
+            n["source_app_id"] = src["app_id"]
+            n["source_app_name"] = src["app_name"]
+            n["source_rating"] = src["rating"]
             n["created_utc"] = src["created_utc"]
             n["permalink"] = src["permalink"]
             needs.append(n)
-        print(f"  progress {min(i + batch_size, len(posts))}/{len(posts)}, needs so far: {len(needs)}")
+        print(f"  progress {min(i + batch_size, len(reviews))}/{len(reviews)}, needs so far: {len(needs)}")
     return needs
 
 
@@ -117,40 +120,45 @@ def enrich(clusters, needs):
         members = [needs[idx] for idx in c.get("member_idx", []) if 0 <= idx < len(needs)]
         if not members:
             continue
-        created = [m["created_utc"] for m in members]
+        created = [m["created_utc"] for m in members if m.get("created_utc", 0) > 0]
         pay_quotes = [m["pay_signal"] for m in members if m.get("pay_signal")]
+        source_apps = sorted({m["source_app_name"] for m in members if m.get("source_app_name")})
+        source_ratings = [m["source_rating"] for m in members if m.get("source_rating")]
         rows.append(
             {
                 "cluster_id": i,
                 "name": c["name"],
                 "need_statement": c["need_statement"],
                 "appstore_keywords": c.get("appstore_keywords", [])[:5],
-                "distinct_authors": len({m["author"] for m in members}),
+                "distinct_reviewers": len({m["reviewer_id"] for m in members}),
                 "need_count": len(members),
-                "first_seen": datetime.fromtimestamp(min(created), tz=timezone.utc).date().isoformat(),
-                "last_seen": datetime.fromtimestamp(max(created), tz=timezone.utc).date().isoformat(),
-                "pay_signals": len(pay_quotes),
-                "pay_quotes": pay_quotes[:3],
+                "source_app_count": len(source_apps),
+                "source_apps": source_apps,
+                "first_seen": datetime.fromtimestamp(min(created), tz=timezone.utc).date().isoformat() if created else "",
+                "last_seen": datetime.fromtimestamp(max(created), tz=timezone.utc).date().isoformat() if created else "",
+                "payment_signals": len(pay_quotes),
+                "payment_quotes": pay_quotes[:3],
+                "avg_source_rating": round(sum(source_ratings) / len(source_ratings), 1) if source_ratings else 0,
                 "avg_emotion": round(sum(m.get("emotion", 3) for m in members) / len(members), 1),
                 "frequencies": sorted({m.get("frequency", "occasional") for m in members}),
                 "example_permalinks": [m["permalink"] for m in members[:3]],
             }
         )
-    rows.sort(key=lambda r: (-r["distinct_authors"], -r["pay_signals"]))
+    rows.sort(key=lambda r: (-r["distinct_reviewers"], -r["payment_signals"]))
     return rows
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", default=str(DATA / "01_posts.jsonl"))
+    parser.add_argument("--input", default=str(DATA / "01_reviews.jsonl"))
     args = parser.parse_args()
 
     cfg = load_config()
     client = llm_client()
-    posts = read_jsonl(args.input)
-    print(f"loaded {len(posts)} posts, extracting...")
+    reviews = read_jsonl(args.input)
+    print(f"loaded {len(reviews)} reviews, extracting...")
 
-    needs = extract_needs(client, posts, cfg.get("extract_batch_size", 5))
+    needs = extract_needs(client, reviews, cfg.get("extract_batch_size", 5))
     write_jsonl(DATA / "02_needs.jsonl", needs)
     if not needs:
         print("no needs extracted; check input data or LLM config")

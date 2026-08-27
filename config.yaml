@@ -1,33 +1,31 @@
-# ---- Stage 1: collection ----
-# Site-wide need-signal phrases (searched as quoted phrases).
-# The "paying but unhappy" style signals are the most valuable; add your own.
-phrases:
-  - "is there an app that"
-  - "is there an app for"
-  - "I wish there was an app"
-  - "why isn't there an app"
-  - "looking for an app that"
-  - "I'd pay for an app"
-  - "someone should make an app"
+# ---- App Store storefront used by stages 1 and 3 ----
+country: us
 
-# Vertical audience subreddits (edit these to switch domains)
-vertical_subreddits:
-  - diabetes
-  - Type1Diabetes
-  - Pets
-  - Frugal
+# ---- Stage 1: collect low-rated App Store reviews ----
+# These seed terms are the main steering wheel. Use concrete app categories or
+# jobs-to-be-done rather than broad words such as "productivity".
+app_search_terms:
+  - subscription tracker
+  - pet medication
+  - ADHD planner
+  - family organizer
+  - home inventory
+  - diabetes tracker
 
-time_filter: year        # hour|day|week|month|year|all
-search_sort: new         # "new" favors recurring signals; "top" favors high-heat ones
-per_phrase_limit: 200    # max posts per phrase (Reddit caps a listing at ~1000)
-per_sub_limit: 100       # max posts per vertical subreddit
-comments_for_top_n: 30   # fetch top comments for first N posts per sub (1 extra API call each)
+app_search_limit: 25
+apps_per_search_term: 3
+minimum_app_rating_count: 100
+review_sort: mostrecent
+review_pages_per_app: 2
+review_ratings: [1, 2, 3]
+max_reviews_per_app: 20
+search_request_delay_seconds: 3.1
+review_request_delay_seconds: 0.25
 
 # ---- Stage 2: extraction ----
-extract_batch_size: 5    # posts per LLM call (small batches -> better extraction quality)
+extract_batch_size: 8
 
 # ---- Stage 3: validation ----
-country: us              # App Store storefront
-keywords_per_cluster: 3  # keywords per need cluster for competitor lookup
-new_app_months: 18       # apps released within N months count as "new" (swarm detection)
-swarm_threshold: 3       # >= N new apps -> swarm alert
+keywords_per_cluster: 3
+new_app_months: 18
+swarm_threshold: 3

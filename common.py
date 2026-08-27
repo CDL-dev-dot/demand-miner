@@ -1,4 +1,4 @@
-"""Shared helpers: config loading, JSONL IO, OpenAI-compatible LLM client."""
+"""Shared helpers for configuration, JSONL IO, and supported LLM backends."""
 import json
 import os
 import sys
