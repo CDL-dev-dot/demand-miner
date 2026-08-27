@@ -1,4 +1,4 @@
-"""共享工具：配置加载、JSONL 读写、OpenAI 兼容 LLM 客户端。"""
+"""Shared helpers: config loading, JSONL IO, OpenAI-compatible LLM client."""
 import json
 import os
 import sys
@@ -36,7 +36,7 @@ def llm_client():
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        sys.exit("OPENAI_API_KEY 未配置：请复制 .env.example 为 .env 并填写你的 LLM 网关信息")
+        sys.exit("OPENAI_API_KEY not set: copy .env.example to .env and fill in your LLM endpoint")
     return OpenAI(api_key=api_key, base_url=os.environ.get("OPENAI_BASE_URL") or None)
 
 
@@ -49,7 +49,7 @@ def _parse_json(text):
         s, e = text.find(open_ch), text.rfind(close_ch)
         if s != -1 and e > s:
             return json.loads(text[s : e + 1])
-    raise ValueError(f"LLM 回复中未找到合法 JSON: {text[:200]}")
+    raise ValueError(f"no valid JSON in LLM reply: {text[:200]}")
 
 
 def llm_json(client, prompt, system="You are a precise analyst. Reply with valid JSON only, no prose.", retries=2):

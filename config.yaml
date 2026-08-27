@@ -1,5 +1,6 @@
-# ---- 阶段 1 采集 ----
-# 全站需求信号短语（英文引号短语搜索）。后三类"已付费但不满"信号最值钱，可自行追加
+# ---- Stage 1: collection ----
+# Site-wide need-signal phrases (searched as quoted phrases).
+# The "paying but unhappy" style signals are the most valuable; add your own.
 phrases:
   - "is there an app that"
   - "is there an app for"
@@ -9,7 +10,7 @@ phrases:
   - "I'd pay for an app"
   - "someone should make an app"
 
-# 垂直人群 subreddit（换领域改这里）
+# Vertical audience subreddits (edit these to switch domains)
 vertical_subreddits:
   - diabetes
   - Type1Diabetes
@@ -17,16 +18,16 @@ vertical_subreddits:
   - Frugal
 
 time_filter: year        # hour|day|week|month|year|all
-search_sort: new         # new 抓持续性信号；改 top 抓高热度信号
-per_phrase_limit: 200    # 每条短语最多取多少帖（Reddit 单 listing 上限约 1000）
-per_sub_limit: 100       # 每个垂直 sub 最多取多少帖
-comments_for_top_n: 30   # 垂直 sub 里前 N 帖抓取高赞评论（每帖 1 次额外 API 调用）
+search_sort: new         # "new" favors recurring signals; "top" favors high-heat ones
+per_phrase_limit: 200    # max posts per phrase (Reddit caps a listing at ~1000)
+per_sub_limit: 100       # max posts per vertical subreddit
+comments_for_top_n: 30   # fetch top comments for first N posts per sub (1 extra API call each)
 
-# ---- 阶段 2 提炼 ----
-extract_batch_size: 5    # 每次 LLM 调用处理几个帖子（token 免费，批次小一点提取质量更高）
+# ---- Stage 2: extraction ----
+extract_batch_size: 5    # posts per LLM call (small batches -> better extraction quality)
 
-# ---- 阶段 3 验证 ----
-country: us              # App Store 国家
-keywords_per_cluster: 3  # 每个需求簇用几个关键词查竞品
-new_app_months: 18       # 上架不满 N 个月算"新品"（蜂群判定用）
-swarm_threshold: 3       # 新品数 >= N 判定为蜂群已至
+# ---- Stage 3: validation ----
+country: us              # App Store storefront
+keywords_per_cluster: 3  # keywords per need cluster for competitor lookup
+new_app_months: 18       # apps released within N months count as "new" (swarm detection)
+swarm_threshold: 3       # >= N new apps -> swarm alert

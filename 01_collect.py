@@ -1,7 +1,8 @@
-"""阶段 1：通过 Reddit 官方 API 采集需求信号帖。
+"""Stage 1: collect need-signal posts via the official Reddit Data API (read-only).
 
-两条腿：全站短语搜索（"is there an app" 等）+ 垂直 subreddit 年度热帖（含高赞评论）。
-产出 data/01_posts.jsonl。praw 会自动遵守 100 QPM 限速，无需手动 sleep。
+Two legs: site-wide phrase search ("is there an app" etc.) + yearly top posts of
+vertical subreddits (with top comments). Output: data/01_posts.jsonl.
+PRAW enforces the 100 QPM free-tier rate limit automatically; no manual sleeps needed.
 """
 import argparse
 import os
@@ -34,8 +35,8 @@ def main():
 
     if not (os.environ.get("REDDIT_CLIENT_ID") and os.environ.get("REDDIT_CLIENT_SECRET")):
         sys.exit(
-            "缺少 Reddit 凭据。请在 https://www.reddit.com/prefs/apps 创建 script 类型应用，"
-            "并把 client_id/secret 填入 .env（参考 .env.example）"
+            "Missing Reddit credentials. Create a script-type app at "
+            "https://www.reddit.com/prefs/apps and fill client_id/secret into .env (see .env.example)"
         )
 
     import praw
@@ -61,7 +62,7 @@ def main():
                 continue
             seen.add(p.id)
             rows.append(post_row(p, "phrase_search", phrase))
-        print(f'[phrase] "{phrase}" -> 累计 {len(rows)} 帖')
+        print(f'[phrase] "{phrase}" -> {len(rows)} posts total')
 
     for sub in cfg.get("vertical_subreddits", []):
         fetched = 0
@@ -80,13 +81,13 @@ def main():
                         top = sorted(p.comments, key=lambda c: getattr(c, "score", 0), reverse=True)[:5]
                         row["top_comments"] = [c.body[:500] for c in top]
                     except Exception as e:
-                        print(f"  评论抓取失败 {p.id}: {e}")
+                        print(f"  comment fetch failed {p.id}: {e}")
                 rows.append(row)
                 fetched += 1
         except Exception as e:
-            print(f"[sub] r/{sub} 抓取失败（sub 不存在或被限制）: {e}")
+            print(f"[sub] r/{sub} fetch failed (missing or restricted): {e}")
             continue
-        print(f"[sub] r/{sub} -> 累计 {len(rows)} 帖")
+        print(f"[sub] r/{sub} -> {len(rows)} posts total")
 
     write_jsonl(args.output, rows)
 

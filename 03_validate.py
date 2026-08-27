@@ -1,9 +1,10 @@
-"""阶段 3：竞争验证。
+"""Stage 3: competition validation.
 
-对每个需求簇用 App Store 官方搜索接口（iTunes Search API，免费无需 key）扫竞品：
-数量、评分、评论数、上架时间、最近更新——重点判定"蜂群"（近期新品扎堆）与
-"翻新机会"（头部竞品体量大但评分低/久未更新）。可选 Firecrawl 做 web 端补充扫描。
-产出 data/03_validated.jsonl。
+Scans App Store competitors for each need cluster via the official iTunes Search API
+(free, no key): count, ratings, review volume, release and last-update dates. Focus:
+"swarm" detection (recent same-niche launches piling up) and "stale leader" detection
+(big but low-rated / long-unmaintained incumbent). Optional Firecrawl web-side scan.
+Output: data/03_validated.jsonl.
 """
 import argparse
 import os
@@ -42,7 +43,7 @@ def firecrawl_web_scan(keyword):
         items = resp.json().get("data", {}).get("web", []) or []
         return [{"title": it.get("title"), "url": it.get("url")} for it in items]
     except Exception as e:
-        print(f"  firecrawl 扫描失败（不影响主流程）: {e}")
+        print(f"  firecrawl scan failed (non-fatal): {e}")
         return None
 
 
@@ -66,11 +67,11 @@ def validate_cluster(cluster, cfg):
         try:
             results = search_appstore(kw, country)
         except Exception as e:
-            print(f"  iTunes 查询失败 '{kw}': {e}")
+            print(f"  iTunes lookup failed '{kw}': {e}")
             continue
         for a in results:
             apps[a["trackId"]] = a
-        time.sleep(3.1)  # iTunes Search API 软限速约 20 次/分钟
+        time.sleep(3.1)  # iTunes Search API soft limit ~20 req/min
 
     parsed = []
     for a in apps.values():
@@ -124,7 +125,7 @@ def main():
     clusters = read_jsonl(args.input)
     rows = []
     for i, c in enumerate(clusters):
-        print(f"[{i + 1}/{len(clusters)}] 验证: {c['name']}")
+        print(f"[{i + 1}/{len(clusters)}] validating: {c['name']}")
         rows.append(validate_cluster(c, cfg))
     write_jsonl(args.output, rows)
 

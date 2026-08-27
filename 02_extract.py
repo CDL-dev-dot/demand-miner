@@ -1,7 +1,8 @@
-"""阶段 2：LLM 提炼需求信号并聚类成"需求簇"。
+"""Stage 2: LLM need extraction and clustering.
 
-每帖提取 0..n 条需求（含付费信号、情绪强度），再跨帖聚类。
-产出 data/02_needs.jsonl（明细）与 data/02_clusters.jsonl（需求簇，进入阶段 3）。
+Extracts 0..n needs per post (with pay signals and emotion intensity), then clusters
+across posts. Output: data/02_needs.jsonl (detail) and data/02_clusters.jsonl (clusters
+that feed stage 3).
 """
 import argparse
 import json
@@ -67,7 +68,7 @@ def extract_needs(client, posts, batch_size):
         try:
             result = llm_json(client, EXTRACT_PROMPT + json.dumps(payload, ensure_ascii=False))
         except Exception as e:
-            print(f"  批次 {i} 提取失败，跳过: {e}")
+            print(f"  batch {i} extraction failed, skipping: {e}")
             continue
         for n in result.get("needs", []):
             src = post_by_id.get(n.get("post_id"))
@@ -77,7 +78,7 @@ def extract_needs(client, posts, batch_size):
             n["created_utc"] = src["created_utc"]
             n["permalink"] = src["permalink"]
             needs.append(n)
-        print(f"  进度 {min(i + batch_size, len(posts))}/{len(posts)}，累计需求 {len(needs)} 条")
+        print(f"  progress {min(i + batch_size, len(posts))}/{len(posts)}, needs so far: {len(needs)}")
     return needs
 
 
@@ -93,7 +94,7 @@ def cluster_needs(client, needs, kw_n):
     if len(indexed) <= 150:
         return one_pass(indexed)
 
-    # 超过单次上下文合理规模时：分块粗聚类，再做一次合并
+    # Too large for a single call: coarse-cluster in chunks, then merge once
     chunk_clusters = []
     for i in range(0, len(indexed), 120):
         chunk_clusters.extend(one_pass(indexed[i : i + 120]))
@@ -147,12 +148,12 @@ def main():
     cfg = load_config()
     client = llm_client()
     posts = read_jsonl(args.input)
-    print(f"读入 {len(posts)} 帖，开始提取…")
+    print(f"loaded {len(posts)} posts, extracting...")
 
     needs = extract_needs(client, posts, cfg.get("extract_batch_size", 5))
     write_jsonl(DATA / "02_needs.jsonl", needs)
     if not needs:
-        print("未提取到任何需求，检查输入数据或 LLM 配置")
+        print("no needs extracted; check input data or LLM config")
         return
 
     clusters = cluster_needs(client, needs, cfg.get("keywords_per_cluster", 3))

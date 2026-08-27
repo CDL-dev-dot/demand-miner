@@ -1,7 +1,9 @@
-"""阶段 4：评分与报告。
+"""Stage 4: scoring and report.
 
-确定性打分（需求热度 / 竞争窗口 / 市场付费证据）+ 可选 LLM 定性判定
-（伪需求概率、苹果政策风险、差异化角度）。产出 data/04_report.md 与 .csv。
+Deterministic scores (demand heat / competition window / payment evidence) plus an
+optional LLM qualitative pass (fake-need risk, Apple policy risk, differentiation).
+Output: data/04_report.md and .csv. Report labels are intentionally in Chinese
+(the tool author's reading language); code and logs are English.
 """
 import argparse
 import csv
@@ -28,20 +30,20 @@ def deterministic_scores(c):
     a = c.get("appstore", {})
     demand = min(6, c.get("distinct_authors", 0)) + min(2, c.get("pay_signals", 0))
     if c.get("first_seen") and c.get("last_seen") and c["first_seen"][:7] != c["last_seen"][:7]:
-        demand += 2  # 跨月出现，非一次性热点
+        demand += 2  # spans multiple months, not a one-off spike
 
     window = 10
     if a.get("swarm"):
         window -= 5
     leader = (a.get("top_apps") or [None])[0]
     if leader and leader["reviews"] >= 10000 and leader["rating"] >= 4.5 and not a.get("leader_stale"):
-        window -= 3  # 存在强势健康的头部竞品
+        window -= 3  # strong, healthy incumbent leader present
     if a.get("leader_stale"):
-        window += 2  # 头部老旧/低分 = 翻新机会
+        window += 2  # stale/low-rated leader = renovation opening
     window = max(0, min(10, window))
 
     leader_reviews = leader["reviews"] if leader else 0
-    evidence = min(10, round(math.log10(leader_reviews + 1) * 2.5, 1))  # 有人做出规模 = 付费证据
+    evidence = min(10, round(math.log10(leader_reviews + 1) * 2.5, 1))  # built at scale = payment evidence
 
     total = round(demand * 0.4 + window * 0.35 + evidence * 0.25, 1)
     return demand, window, evidence, total
@@ -60,7 +62,7 @@ def verdict_by_rule(total, swarm):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default=str(DATA / "03_validated.jsonl"))
-    parser.add_argument("--skip-llm", action="store_true", help="跳过 LLM 定性判定（无 key 时自动跳过）")
+    parser.add_argument("--skip-llm", action="store_true", help="skip the LLM qualitative pass (auto-skipped without a key)")
     parser.add_argument("--llm-top-n", type=int, default=8)
     args = parser.parse_args()
 
@@ -82,9 +84,9 @@ def main():
             try:
                 c["qualitative"] = llm_json(client, QUALITATIVE_PROMPT + json.dumps(c, ensure_ascii=False))
             except Exception as e:
-                print(f"  定性判定失败 {c['name']}: {e}")
+                print(f"  qualitative pass failed {c['name']}: {e}")
     else:
-        print("跳过 LLM 定性判定（--skip-llm 或未配置 OPENAI_API_KEY）")
+        print("skipping LLM qualitative pass (--skip-llm or OPENAI_API_KEY not set)")
 
     md = ["# 需求挖掘报告\n", "| # | 需求簇 | 独立人数 | 付费信号 | 竞品 | 新品 | 总分 | 判定 |", "|---|---|---|---|---|---|---|---|"]
     for i, c in enumerate(scored, 1):
@@ -122,7 +124,7 @@ def main():
 
     report_path = DATA / "04_report.md"
     report_path.write_text("\n".join(md), encoding="utf-8")
-    print(f"报告 -> {report_path}")
+    print(f"report -> {report_path}")
 
     csv_path = DATA / "04_report.csv"
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
