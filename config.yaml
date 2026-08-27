@@ -1,0 +1,32 @@
+# ---- 阶段 1 采集 ----
+# 全站需求信号短语（英文引号短语搜索）。后三类"已付费但不满"信号最值钱，可自行追加
+phrases:
+  - "is there an app that"
+  - "is there an app for"
+  - "I wish there was an app"
+  - "why isn't there an app"
+  - "looking for an app that"
+  - "I'd pay for an app"
+  - "someone should make an app"
+
+# 垂直人群 subreddit（换领域改这里）
+vertical_subreddits:
+  - diabetes
+  - Type1Diabetes
+  - Pets
+  - Frugal
+
+time_filter: year        # hour|day|week|month|year|all
+search_sort: new         # new 抓持续性信号；改 top 抓高热度信号
+per_phrase_limit: 200    # 每条短语最多取多少帖（Reddit 单 listing 上限约 1000）
+per_sub_limit: 100       # 每个垂直 sub 最多取多少帖
+comments_for_top_n: 30   # 垂直 sub 里前 N 帖抓取高赞评论（每帖 1 次额外 API 调用）
+
+# ---- 阶段 2 提炼 ----
+extract_batch_size: 5    # 每次 LLM 调用处理几个帖子（token 免费，批次小一点提取质量更高）
+
+# ---- 阶段 3 验证 ----
+country: us              # App Store 国家
+keywords_per_cluster: 3  # 每个需求簇用几个关键词查竞品
+new_app_months: 18       # 上架不满 N 个月算"新品"（蜂群判定用）
+swarm_threshold: 3       # 新品数 >= N 判定为蜂群已至
