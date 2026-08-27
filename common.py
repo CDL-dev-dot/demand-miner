@@ -31,12 +31,25 @@ def write_jsonl(path, rows):
     print(f"wrote {len(rows)} rows -> {path}")
 
 
+def llm_backend():
+    return os.environ.get("LLM_BACKEND", "openai").lower()
+
+
+def llm_available():
+    return llm_backend() == "cursor" or bool(os.environ.get("OPENAI_API_KEY"))
+
+
 def llm_client():
+    if llm_backend() == "cursor":
+        return None  # Cursor CLI backend needs no HTTP client
     from openai import OpenAI
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        sys.exit("OPENAI_API_KEY not set: copy .env.example to .env and fill in your LLM endpoint")
+        sys.exit(
+            "No LLM configured: set OPENAI_API_KEY in .env, or set LLM_BACKEND=cursor "
+            "to use the Cursor CLI (one-time: cursor-agent login)"
+        )
     return OpenAI(api_key=api_key, base_url=os.environ.get("OPENAI_BASE_URL") or None)
 
 
@@ -52,7 +65,30 @@ def _parse_json(text):
     raise ValueError(f"no valid JSON in LLM reply: {text[:200]}")
 
 
+def _cursor_cli_json(prompt, system, retries):
+    """Run the prompt through the Cursor CLI (uses the user's Cursor subscription)."""
+    import subprocess
+
+    cmd = ["cursor-agent", "--print", "--output-format", "text", "--mode", "ask", "--trust"]
+    model = os.environ.get("CURSOR_MODEL")
+    if model:
+        cmd += ["--model", model]
+    full = f"{system}\n\n{prompt}\n\nReply with valid JSON only. No prose, no markdown fences."
+    last_err = None
+    for _ in range(retries + 1):
+        try:
+            out = subprocess.run(cmd + [full], capture_output=True, text=True, timeout=600)
+            if out.returncode != 0:
+                raise RuntimeError(f"cursor-agent exit {out.returncode}: {out.stderr[:200]}")
+            return _parse_json(out.stdout.strip())
+        except Exception as e:  # includes timeout / parse errors; retry
+            last_err = e
+    raise last_err
+
+
 def llm_json(client, prompt, system="You are a precise analyst. Reply with valid JSON only, no prose.", retries=2):
+    if llm_backend() == "cursor":
+        return _cursor_cli_json(prompt, system, retries)
     model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     last_err = None
     for _ in range(retries + 1):

@@ -34,8 +34,12 @@ cp .env.example .env   # then fill in credentials, see below
    https://www.reddit.com/prefs/apps to get the client id (the string shown under
    "personal use script") and secret. Describe the use case honestly ("personal
    research"). The free tier allows 100 queries/minute; PRAW throttles automatically.
-2. **LLM**: any OpenAI-compatible endpoint (`OPENAI_BASE_URL` + `OPENAI_API_KEY` +
-   `OPENAI_MODEL`).
+2. **LLM**, two backend options via `LLM_BACKEND`:
+   - `openai` (default): any OpenAI-compatible endpoint (`OPENAI_BASE_URL` +
+     `OPENAI_API_KEY` + `OPENAI_MODEL`).
+   - `cursor`: pipes prompts through the local [Cursor CLI](https://cursor.com/cli)
+     (`cursor-agent --print --mode ask`), using your Cursor subscription — no API key.
+     One-time setup: `cursor-agent login`. Optional `CURSOR_MODEL` to pin a model.
 3. **Firecrawl** (optional): if set, stage 3 adds a web-side competitor scan;
    otherwise it is skipped automatically.
 
@@ -70,11 +74,12 @@ Try the second half without any Reddit credentials (stages 3/4 need no keys at a
 
 ## Known limitations
 
-- **Keyword granularity drives stage-3 precision**: broad keywords (e.g. "carb
-  counting app") pull in an entire category (MyFitnessPal etc.) and can misjudge a
-  vertical niche as a red ocean. Catch vertical wedges with the stage-4 LLM pass
-  (positioning mismatch between competitors and the need statement) plus human review;
-  you can also hand-edit `appstore_keywords` in `02_clusters.jsonl` and rerun stage 3.
+- **Competitor relevance is LLM-judged**: raw keyword search pulls in loosely related
+  apps (clothing stores for "clothing care tags"). When an LLM backend is configured,
+  stage 3 asks it to keep only direct competitors before computing swarm/leader
+  metrics (name-token heuristic as fallback). Raw counts stay in `total_matched`,
+  category giants in `category_leaders`. You can also hand-edit `appstore_keywords`
+  in `02_clusters.jsonl` and rerun stage 3.
 - The iTunes Search API only reflects the search head; long-tail competitors may be
   missed. Swarm detection is based on each app's original `releaseDate`.
 - Reddit listings cap at ~1000 items each; coverage comes from combining multiple

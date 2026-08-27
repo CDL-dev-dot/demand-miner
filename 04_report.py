@@ -22,8 +22,21 @@ Reply JSON:
 - differentiation: one concrete angle given the competitor situation
 - verdict: one of GO | WATCH | SKIP, with one-line reason
 
+Each field must be an object: {"level": "...", "reason": "..."} (for verdict use
+{"decision": "...", "reason": "..."}). Write every reason in Chinese; keep
+level/decision values as the English enums above.
+
 Cluster data:
 """
+
+
+def fmt_q(v):
+    """Render a qualitative field that may be a dict or a plain string."""
+    if isinstance(v, dict):
+        level = v.get("level") or v.get("decision") or ""
+        reason = v.get("reason", "")
+        return f"{level}（{reason}）" if reason else str(level)
+    return v
 
 
 def deterministic_scores(c):
@@ -75,7 +88,9 @@ def main():
         scored.append(c)
     scored.sort(key=lambda c: -c["scores"]["total"])
 
-    use_llm = not args.skip_llm and os.environ.get("OPENAI_API_KEY")
+    from common import llm_available
+
+    use_llm = not args.skip_llm and llm_available()
     if use_llm:
         from common import llm_client
 
@@ -93,7 +108,7 @@ def main():
         a = c.get("appstore", {})
         md.append(
             f"| {i} | {c['name']} | {c.get('distinct_authors', 0)} | {c.get('pay_signals', 0)} "
-            f"| {a.get('total_matched', 0)} | {a.get('new_apps_count', 0)} | {c['scores']['total']} | {c['verdict']} |"
+            f"| {a.get('relevant_matched', a.get('total_matched', 0))} | {a.get('new_apps_count', 0)} | {c['scores']['total']} | {c['verdict']} |"
         )
 
     for c in scored:
@@ -103,7 +118,7 @@ def main():
             f"- 需求陈述：{c['need_statement']}",
             f"- 信号：{c.get('distinct_authors', 0)} 个独立发帖人，{c.get('first_seen', '?')} ~ {c.get('last_seen', '?')}，"
             f"付费信号 {c.get('pay_signals', 0)} 条，情绪均值 {c.get('avg_emotion', '-')}",
-            f"- 竞争：匹配 {a.get('total_matched', 0)} 款；近 18 月新品 {a.get('new_apps_count', 0)} 款"
+            f"- 竞争：相关竞品 {a.get('relevant_matched', 0)} 款（原始匹配 {a.get('total_matched', 0)}）；近 18 月相关新品 {a.get('new_apps_count', 0)} 款"
             f"{'（蜂群警报）' if a.get('swarm') else ''}{'；头部竞品老旧/低分（翻新机会）' if a.get('leader_stale') else ''}",
             f"- 评分：需求 {c['scores']['demand']}/10 · 窗口 {c['scores']['window']}/10 · 付费证据 {c['scores']['evidence']}/10 · **总分 {c['scores']['total']}** → {c['verdict']}",
         ]
@@ -116,8 +131,8 @@ def main():
         if c.get("qualitative"):
             q = c["qualitative"]
             md.append(
-                f"- LLM 判定：伪需求风险 {q.get('fake_need_risk')}｜政策风险 {q.get('apple_policy_risk')}"
-                f"｜单人可行性 {q.get('solo_feasibility')}｜差异化：{q.get('differentiation')}｜结论：{q.get('verdict')}"
+                f"- LLM 判定：伪需求风险 {fmt_q(q.get('fake_need_risk'))}｜政策风险 {fmt_q(q.get('apple_policy_risk'))}"
+                f"｜单人可行性 {fmt_q(q.get('solo_feasibility'))}｜差异化：{fmt_q(q.get('differentiation'))}｜结论：{fmt_q(q.get('verdict'))}"
             )
         if c.get("example_permalinks"):
             md.append("- 溯源：" + " ".join(c["example_permalinks"]))
